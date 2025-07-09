@@ -23,8 +23,17 @@ release: clean
 		OS=$$(echo $$platform | cut -d/ -f1); \
 		ARCH=$$(echo $$platform | cut -d/ -f2); \
 		OUT_DIR=$(BUILD_DIR)/$$OS-$$ARCH; \
+		OUT_BIN=$$OUT_DIR/$(APP_NAME); \
 		mkdir -p $$OUT_DIR; \
-		GOOS=$$OS GOARCH=$$ARCH go build -ldflags="$(LDFLAGS)" -o $$OUT_DIR/$(APP_NAME) .; \
+		GOOS=$$OS GOARCH=$$ARCH CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $$OUT_BIN .; \
 		for archive in $(ARCHIVES); do \
 			case $$archive in \
-				tar) tar -czf $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.tar.gz -
+				tar) tar -czf $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.tar.gz -C $$OUT_DIR $(APP_NAME) ;; \
+				zip) zip -j $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.zip $$OUT_BIN ;; \
+			esac; \
+		done; \
+	done
+	@echo "✅ Done. Binaries and archives are in $(BUILD_DIR)/"
+
+clean:
+	rm -rf $(BUILD_DIR) $(APP_NAME)
