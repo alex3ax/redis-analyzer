@@ -10,20 +10,44 @@ detect_platform() {
   OS="$(uname | tr '[:upper:]' '[:lower:]')"
   ARCH="$(uname -m)"
 
-  case "$ARCH" in
-    x86_64) ARCH="amd64" ;;
-    arm64|aarch64) ARCH="arm64" ;;
-    *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
-  esac
+  if [ "$OS" = "linux" ]; then
+    ARCH="amd64"
+  else
+    case "$ARCH" in
+      x86_64) ARCH="amd64" ;;
+      arm64|aarch64) ARCH="arm64" ;;
+      *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+  fi
 
   echo "${OS}-${ARCH}"
+}
+
+download_file() {
+  url="$1"
+  dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sSLf -o "$dest" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$dest" "$url"
+  else
+    echo "❌ Neither curl nor wget is installed."
+    exit 1
+  fi
 }
 
 download_and_install() {
   PLATFORM=$(detect_platform)
 
   if [ "$VERSION" == "latest" ]; then
-    VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep tag_name | cut -d '"' -f 4)
+    if command -v curl >/dev/null 2>&1; then
+      VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep tag_name | cut -d '"' -f 4)
+    elif command -v wget >/dev/null 2>&1; then
+      VERSION=$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" | grep tag_name | cut -d '"' -f 4)
+    else
+      echo "❌ Neither curl nor wget is installed."
+      exit 1
+    fi
   fi
 
   echo "📦 Installing redis-analyzer ${VERSION} for ${PLATFORM}..."
@@ -35,7 +59,7 @@ download_and_install() {
   cd "$TMP_DIR"
 
   echo "⬇️  Downloading $URL"
-  curl -sSLf -o "$ARCHIVE_NAME" "$URL"
+  download_file "$URL" "$ARCHIVE_NAME"
 
   echo "📂 Extracting..."
   tar -xzf "$ARCHIVE_NAME"
