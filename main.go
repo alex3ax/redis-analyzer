@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -25,6 +26,7 @@ var (
 	workerCount   int
 	shortTTL      int
 	exportPath    string
+	useTLS        bool
 )
 
 var ctx = context.Background()
@@ -34,10 +36,10 @@ type TTLStats struct {
 	Expired      int
 	Short        int
 	Long         int
-	SizeNoExpiry int64 // байты для NoExpiry
-	SizeExpired  int64 // байты для Expired
-	SizeShort    int64 // байты для Short TTL
-	SizeLong     int64 // байты для Long TTL
+	SizeNoExpiry int64
+	SizeExpired  int64
+	SizeShort    int64
+	SizeLong     int64
 	sync.Mutex
 }
 
@@ -63,6 +65,7 @@ func main() {
 	rootCmd.Flags().IntVar(&workerCount, "workers", 5, "Number of worker goroutines")
 	rootCmd.Flags().IntVar(&shortTTL, "short-ttl", 3600, "Threshold (in seconds) for short TTL")
 	rootCmd.Flags().StringVar(&exportPath, "export", "", "Path to CSV file for export (optional)")
+	rootCmd.Flags().BoolVar(&useTLS, "tls", false, "Enable TLS connection to Redis")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -70,12 +73,22 @@ func main() {
 }
 
 func runAnalyzer(cmd *cobra.Command, args []string) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:      redisAddr,
-		Password:  redisPassword,
-		DB:        redisDB,
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	})
+	opts := &redis.Options{
+		Addr:     redisAddr,
+		Password: redisPassword,
+		DB:       redisDB,
+	}
+	if useTLS {
+		opts.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	rdb := redis.NewClient(opts)
+
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis at %s: %v", redisAddr, err)
+	}
+	fmt.Printf("✅ Connected to Redis at %s\n", redisAddr)
 
 	keyChan := make(chan string, 1000)
 	wg := sync.WaitGroup{}
@@ -83,30 +96,35 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 	ttlStats := TTLStats{}
 	hashMap := sync.Map{}
 
+	var processedKeys int64 = 0
+
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for key := range keyChan {
 				ttl, err := rdb.TTL(ctx, key).Result()
+
 				val, errVal := rdb.Get(ctx, key).Bytes()
+
 				if err == nil && errVal == nil {
 					ttlStats.Lock()
+					size := int64(len(val))
 					switch {
 					case ttl < 0:
 						if ttl == -1 {
 							ttlStats.NoExpiry++
-							ttlStats.SizeNoExpiry += int64(len(val))
+							ttlStats.SizeNoExpiry += size
 						} else {
 							ttlStats.Expired++
-							ttlStats.SizeExpired += int64(len(val))
+							ttlStats.SizeExpired += size
 						}
 					case ttl < time.Duration(shortTTL)*time.Second:
 						ttlStats.Short++
-						ttlStats.SizeShort += int64(len(val))
+						ttlStats.SizeShort += size
 					default:
 						ttlStats.Long++
-						ttlStats.SizeLong += int64(len(val))
+						ttlStats.SizeLong += size
 					}
 					ttlStats.Unlock()
 
@@ -120,9 +138,16 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 					stats.TTLs[key] = ttl
 					stats.Unlock()
 				}
+
+				atomic.AddInt64(&processedKeys, 1)
+				if processedKeys%1000 == 0 {
+					fmt.Printf("⏳ Processed keys: %d\n", processedKeys)
+				}
 			}
 		}()
 	}
+
+	fmt.Printf("🔍 Starting SCAN with pattern '%s'...\n", matchPattern)
 
 	cursor := uint64(0)
 	for {
@@ -142,12 +167,15 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 	close(keyChan)
 	wg.Wait()
 
+	fmt.Printf("✅ Scan complete. Total keys processed: %d\n\n", processedKeys)
+
 	fmt.Println("TTL Stats:")
-	fmt.Printf("  No Expiry: %d (%.2f MB)\n", ttlStats.NoExpiry, float64(ttlStats.SizeNoExpiry)/1024.0/1024.0)
-	fmt.Printf("  Expired:   %d (%.2f MB)\n", ttlStats.Expired, float64(ttlStats.SizeExpired)/1024.0/1024.0)
-	fmt.Printf("  Short TTL: %d (%.2f MB)\n", ttlStats.Short, float64(ttlStats.SizeShort)/1024.0/1024.0)
-	fmt.Printf("  Long TTL:  %d (%.2f MB)\n", ttlStats.Long, float64(ttlStats.SizeLong)/1024.0/1024.0)
-	fmt.Printf("  Total Size: %.2f MB\n", float64(ttlStats.SizeNoExpiry+ttlStats.SizeExpired+ttlStats.SizeShort+ttlStats.SizeLong)/1024.0/1024.0)
+	fmt.Printf("  No Expiry: %d (%.2f MB)\n", ttlStats.NoExpiry, float64(ttlStats.SizeNoExpiry)/1024/1024)
+	fmt.Printf("  Expired:   %d (%.2f MB)\n", ttlStats.Expired, float64(ttlStats.SizeExpired)/1024/1024)
+	fmt.Printf("  Short TTL: %d (%.2f MB)\n", ttlStats.Short, float64(ttlStats.SizeShort)/1024/1024)
+	fmt.Printf("  Long TTL:  %d (%.2f MB)\n", ttlStats.Long, float64(ttlStats.SizeLong)/1024/1024)
+	fmt.Printf("  Total Size: %.2f MB\n",
+		float64(ttlStats.SizeNoExpiry+ttlStats.SizeExpired+ttlStats.SizeShort+ttlStats.SizeLong)/1024/1024)
 
 	fmt.Println("\nDuplicate values:")
 	if exportPath != "" {

@@ -40,6 +40,7 @@ redis-analyzer --addr localhost:6379 --match "cache:*" --export report.csv
 | `--workers`      | Кол-во воркеров (параллельных сканеров)            | `5`                           |
 | `--short-ttl`    | Порог для “коротких” TTL (в секундах)              | `3600`                        |
 | `--export`       | Путь для экспорта CSV-отчёта по дубликатам         | `""` (только вывод в терминал)|
+| `--tls`          | Enable TLS connection to Redis                     | `false`                       |
 
 ---
 
