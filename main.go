@@ -141,7 +141,7 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 
 				atomic.AddInt64(&processedKeys, 1)
 				if processedKeys%1000 == 0 {
-					fmt.Printf("⏳ Processed keys: %d\n", processedKeys)
+					fmt.Printf("\r⏳ Processed keys: %-10d", processedKeys)
 				}
 			}
 		}()
@@ -167,6 +167,7 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 	close(keyChan)
 	wg.Wait()
 
+	fmt.Printf("\r%80s\r", "")
 	fmt.Printf("✅ Scan complete. Total keys processed: %d\n\n", processedKeys)
 
 	fmt.Println("TTL Stats:")
@@ -180,15 +181,17 @@ func runAnalyzer(cmd *cobra.Command, args []string) {
 	fmt.Println("\nDuplicate values:")
 	if exportPath != "" {
 		exportToCSV(&hashMap, exportPath)
-	} else {
-		hashMap.Range(func(_, v interface{}) bool {
-			stats := v.(*DupStats)
-			if stats.Count > 1 {
-				fmt.Printf("  Count: %d, Size: %.2f KB, Sample: %s\n", stats.Count, float64(stats.Size)/1024.0, freshestKey(stats.TTLs))
-			}
-			return true
-		})
 	}
+
+	var potentialSavings int64 = 0
+	hashMap.Range(func(_, v interface{}) bool {
+		stats := v.(*DupStats)
+		if stats.Count > 1 {
+			potentialSavings += int64(stats.Size) * int64(stats.Count-1) / int64(stats.Count)
+		}
+		return true
+	})
+	fmt.Printf("Potential savings from deduplication: %.2f MB\n", float64(potentialSavings)/1024.0/1024.0)
 }
 
 func freshestKey(ttls map[string]time.Duration) string {
