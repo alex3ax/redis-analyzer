@@ -63,7 +63,7 @@ func main() {
 	rootCmd.Flags().IntVar(&redisDB, "db", 0, "Redis database")
 	rootCmd.Flags().StringVar(&matchPattern, "match", "*", "Key pattern to match")
 	rootCmd.Flags().IntVar(&workerCount, "workers", 5, "Number of worker goroutines")
-	rootCmd.Flags().IntVar(&shortTTL, "short-ttl", 3600, "Threshold (in seconds) for short TTL")
+	rootCmd.Flags().IntVar(&shortTTL, "short-ttl", 3600*24, "Threshold (in seconds) for short TTL")
 	rootCmd.Flags().StringVar(&exportPath, "export", "", "Path to CSV file for export (optional)")
 	rootCmd.Flags().BoolVar(&useTLS, "tls", false, "Enable TLS connection to Redis")
 
@@ -206,7 +206,7 @@ func freshestKey(ttls map[string]time.Duration) string {
 func exportToCSV(hashMap *sync.Map, path string) {
 	type row struct {
 		Count  int
-		SizeKB float64
+		SizeMB float64
 		Sample string
 	}
 
@@ -214,10 +214,11 @@ func exportToCSV(hashMap *sync.Map, path string) {
 
 	hashMap.Range(func(_, v interface{}) bool {
 		stats := v.(*DupStats)
-		if stats.Count > 1 {
+		sizeMB := float64(stats.Size) / 1024.0 / 1024.0
+		if stats.Count > 1 && sizeMB >= 1.0 {
 			rows = append(rows, row{
 				Count:  stats.Count,
-				SizeKB: float64(stats.Size) / 1024.0,
+				SizeMB: sizeMB,
 				Sample: freshestKey(stats.TTLs),
 			})
 		}
@@ -225,7 +226,7 @@ func exportToCSV(hashMap *sync.Map, path string) {
 	})
 
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].SizeKB > rows[j].SizeKB
+		return rows[i].SizeMB > rows[j].SizeMB
 	})
 
 	f, err := os.Create(path)
@@ -236,12 +237,12 @@ func exportToCSV(hashMap *sync.Map, path string) {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	w.Write([]string{"count", "size_kb", "sample"})
+	w.Write([]string{"count", "size(MB)", "sample"})
 
 	for _, r := range rows {
 		w.Write([]string{
 			strconv.Itoa(r.Count),
-			fmt.Sprintf("%.2f", r.SizeKB),
+			fmt.Sprintf("%.2f", r.SizeMB),
 			r.Sample,
 		})
 	}
