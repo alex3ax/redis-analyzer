@@ -3,7 +3,7 @@ VERSION  := $(shell git describe --tags --always --dirty)
 BUILD_DIR := build
 
 PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64
-ARCHIVES  := tar zip
+ARCHIVES  := tar
 
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
@@ -28,7 +28,7 @@ release: clean
 		GOOS=$$OS GOARCH=$$ARCH CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $$OUT_BIN .; \
 		for archive in $(ARCHIVES); do \
 			case $$archive in \
-				tar) tar -czf $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.tar.gz -C $$OUT_DIR $(APP_NAME) ;; \
+				tar) COPYFILE_DISABLE=1 tar --format=ustar -czf $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.tar.gz -C $$OUT_DIR $(APP_NAME) ;; \
 				zip) zip -j $(BUILD_DIR)/$(APP_NAME)-$$OS-$$ARCH.zip $$OUT_BIN ;; \
 			esac; \
 		done; \
