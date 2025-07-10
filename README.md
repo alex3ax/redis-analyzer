@@ -39,7 +39,7 @@ redis-analyzer --addr localhost:6379 --match "cache:*" --export report.csv
 | `--match`        | Шаблон ключей для сканирования                     | `"*"`                         |
 | `--workers`      | Кол-во воркеров (параллельных сканеров)            | `5`                           |
 | `--short-ttl`    | Порог для “коротких” TTL (в секундах)              | `86400` (сутки)               |
-| `--export`       | Путь для экспорта CSV-отчёта по дубликатам         | `""` (только вывод в терминал)|
+| `--export`       | Путь для экспорта CSV-отчёта по дубликатам         | `""` (не генерировать отчет)  |
 | `--tls`          | Enable TLS connection to Redis                     | `false`                       |
 
 ---
@@ -62,7 +62,7 @@ make release
 ```
 build/
 ├── redis-analyzer-linux-amd64.tar.gz
-├── redis-analyzer-darwin-arm64.zip
+├── redis-analyzer-darwin-arm64.tar.gz
 ...
 ```
 
@@ -71,7 +71,7 @@ build/
 ## 📋 Пример отчёта `report.csv`
 
 ```csv
-count,size_kb,sample
+count,size(MB),sample
 5,123.45,cache:product:latest
 3,98.76,cache:variant:234
 ```
